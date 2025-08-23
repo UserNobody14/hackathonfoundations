@@ -174,55 +174,53 @@ class YouTubeTranscriber:
         return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
-    def save_all(self, data: Dict[str, Any], out_base: Path):
+
+    def save_all(self, data: Dict[str, Any], out_base: Path, include_json=True):
         out_base.parent.mkdir(parents=True, exist_ok=True)
 
-        # Prefer native segments if present; else build from words
+        # Prefer native segments if present; else derive from words
         segments = data.get("segments")
         if not segments:
             segments = self._words_to_segments(data.get("words", []))
 
-        # ---- TXT (word-per-line) unchanged ----
-        txt_lines = [
-            f"[{self._srt_time(w['start'])} - {self._srt_time(w['end'])}] {w['word']}"
-            for w in data.get("words", [])
-        ]
-        (out_base.with_suffix(".txt")).write_text(
-            "\n".join(txt_lines) or data.get("text", ""), encoding="utf-8"
-        )
+        # Build a reliable full text:
+        full_text = (data.get("text") or "").strip()
+        if not full_text and segments:
+            full_text = " ".join((seg.get("text") or "").strip() for seg in segments if seg.get("text"))
 
-        # ---- SRT from segments (unchanged) ----
+        # ---- TXT (word-per-line with spans) ----
+        txt_lines = []
+        for w in data.get("words", []):
+            txt_lines.append(f"[{self._srt_time(w['start'])} - {self._srt_time(w['end'])}] {w['word']}")
+        (out_base.with_suffix(".txt")).write_text("\n".join(txt_lines) or full_text, encoding="utf-8")
+
+        # ---- SRT from segments ----
         srt_lines, idx = [], 1
         for seg in segments:
             srt_lines += [
                 str(idx),
-                f"{self._srt_time(seg['start'])} --> {self._srt_time(seg['end'])}",
+                f"{self._srt_time(float(seg['start']))} --> {self._srt_time(float(seg['end']))}",
                 seg["text"],
                 ""
             ]
             idx += 1
         (out_base.with_suffix(".srt")).write_text("\n".join(srt_lines), encoding="utf-8")
 
-        # ---- Format output JSON ----
-        pretty = [
+        # ---- JSON in your requested format ----
+        pretty = [{"text": full_text}] + [
             {
-                "start": self._srt_time(seg["start"]),
-                "end":   self._srt_time(seg["end"]),
+                "start": self._srt_time(float(seg["start"])),
+                "end":   self._srt_time(float(seg["end"])),
                 "text":  seg["text"],
             }
             for seg in segments
         ]
-        (out_base.with_suffix(".json")).write_text(
-            json.dumps(pretty, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-
-        # Optional per word JSON
-        by_word_json_path = out_base.parent / f"{out_base.name}_by_word.json"
-        by_word_json_path.write_text(
-            json.dumps({"text": data.get("text", ""), "words": data.get("words", [])}, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        if include_json:
+            (out_base.with_suffix(".json")).write_text(
+                json.dumps(pretty, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+    
 
 
     # ---------- Public entry ----------
