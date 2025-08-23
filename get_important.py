@@ -26,7 +26,8 @@ def load_transcript_from_json(json_file_path: str) -> str:
     for segment in data:
         if 'start' in segment and 'text' in segment:
             start_seconds = timestamp_to_seconds(segment['start'])
-            formatted_transcript += f"[{start_seconds:.1f}s] {segment['text']}\n"
+            end_seconds = timestamp_to_seconds(segment['end'])
+            formatted_transcript += f"[{start_seconds:.1f}s - {end_seconds:.1f}s] {segment['text']}\n"
     
     return formatted_transcript
 
@@ -85,3 +86,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
