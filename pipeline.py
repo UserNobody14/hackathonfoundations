@@ -28,7 +28,7 @@ import pickle
 
 from dotenv import load_dotenv
 from transcriber import YouTubeTranscriber
-from get_important import get_important_timestamps
+from highlights import get_important_timestamps
 from cut import cut_and_stitch_video
 
 # Load environment variables
