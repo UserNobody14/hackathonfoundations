@@ -11,7 +11,11 @@ from moviepy import VideoFileClip
 import tempfile
 from transcriber import YouTubeTranscriber
 from pathlib import Path
-import shutil
+from dotenv import load_dotenv
+
+load_dotenv()
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "ERROR")
 
 
 def parse_timestamps(timestamp_text):
@@ -36,14 +40,13 @@ def parse_timestamps(timestamp_text):
 
 
 def download_and_transcribe_youtube_video(
-    url: str, api_key: str, progress_callback=None
+    url: str, progress_callback=None
 ) -> tuple[str, dict]:
     """
     Real function to download and transcribe YouTube video using the transcriber.
 
     Args:
         url: YouTube URL
-        api_key: OpenAI API key for transcription
         progress_callback: Optional callback function to report progress
 
     Returns:
@@ -53,7 +56,7 @@ def download_and_transcribe_youtube_video(
         if progress_callback:
             progress_callback("Initializing transcriber...")
 
-        transcriber = YouTubeTranscriber(api_key)
+        transcriber = YouTubeTranscriber(OPENAI_API_KEY)
 
         # Generate a name for this download based on timestamp
         import datetime
@@ -118,24 +121,8 @@ class VideoShorteningGUI:
 
         # Transcription variables
         self.transcription_data: dict | None = None
-        self.openai_api_key: str | None = None
 
         self.setup_ui()
-
-    def get_api_key(self) -> str | None:
-        """Get OpenAI API key from user or environment."""
-        # First try environment variable
-        api_key = os.getenv("OPENAI_API_KEY")
-        if api_key:
-            return api_key
-
-        # If not found, ask user
-        api_key = simpledialog.askstring(
-            "API Key Required",
-            "Enter your OpenAI API key:",
-            show="*",  # Hide the input like a password
-        )
-        return api_key
 
     def extract_audio_from_video(self, video_path: str) -> str | None:
         """Extract audio from video file and return path to temporary audio file."""
@@ -465,15 +452,6 @@ class VideoShorteningGUI:
             messagebox.showerror("Error", "Please enter a valid YouTube URL.")
             return
 
-        # Get API key
-        if not self.openai_api_key:
-            self.openai_api_key = self.get_api_key()
-            if not self.openai_api_key:
-                messagebox.showerror(
-                    "Error", "OpenAI API key is required for transcription."
-                )
-                return
-
         # Disable UI elements during download
         self.download_button.config(state=tk.DISABLED, text="Downloading...")
         self.url_entry.config(state=tk.DISABLED)
@@ -492,12 +470,8 @@ class VideoShorteningGUI:
             def progress_callback(message):
                 self.root.after(0, lambda: self.progress_var.set(message))
 
-            # Call real download and transcription function
-            if not self.openai_api_key:
-                raise ValueError("OpenAI API key is required")
-
             video_path, transcription_data = download_and_transcribe_youtube_video(
-                url, self.openai_api_key, progress_callback
+                url, progress_callback
             )
 
             # Store transcription data
