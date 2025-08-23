@@ -465,8 +465,9 @@ class VideoPipeline:
             self._transition_to_state(PipelineState.FAILED)
             return False
 
+    # ---------- REPLACE your step_transcribe_video with this ----------
     def step_transcribe_video(self) -> bool:
-        """Transcribe the downloaded video."""
+        """Transcribe the downloaded video and save JSON in the format highlights.py expects."""
         if not self._transition_to_state(PipelineState.TRANSCRIBING):
             return False
 
@@ -476,32 +477,38 @@ class VideoPipeline:
             return False
 
         try:
-            # Extract audio and transcribe
+            # 1) Extract audio & split
             audio_path = self.transcriber.extract_audio_from_video(
                 self.data.original_video_path, Path("input") / self.data.video_name
             )
-
-            # Split audio if needed
             part_files = self.transcriber.split_by_duration(audio_path)
 
-            # Transcribe each part
+            # 2) Transcribe and merge
             results = [self.transcriber.transcribe_file(p) for p in part_files]
-
-            # Merge transcriptions
             transcription_data = self.transcriber.merge_transcripts(results, part_files)
+            self.data.transcription_data = transcription_data  # keep raw in memory for stats, etc.
 
-            # Save transcription data
-            self.data.transcription_data = transcription_data
-
-            # Save transcription to file
-            transcription_file = (
-                self.work_dir / f"transcription_{self.data.session_id}.json"
-            )
-            with open(transcription_file, "w", encoding="utf-8") as f:
+            # 3) (Optional) Keep a raw debug dump
+            raw_file = self.work_dir / f"transcription_raw_{self.data.session_id}.json"
+            with open(raw_file, "w", encoding="utf-8") as f:
                 json.dump(transcription_data, f, ensure_ascii=False, indent=2)
+            self.logger.info(f"Raw transcription saved to: {raw_file}")
 
-            self.data.transcription_file_path = str(transcription_file)
-            self.logger.info(f"Transcription saved to: {transcription_file}")
+            # 4) Save JSON in the EXACT format expected by highlights.py
+            # Prefer the transcriber's save_all() if it exists (writes .json/.srt/.txt),
+            # otherwise fall back to our local writer.
+            if hasattr(self.transcriber, "save_all"):
+                out_base = self.work_dir / f"transcription_{self.data.session_id}"
+                self.transcriber.save_all(transcription_data, out_base, include_json=True)
+                segments_json = out_base.with_suffix(".json")
+            else:
+                segments_json = self._write_segments_json(
+                    transcription_data,
+                    self.work_dir / f"transcription_{self.data.session_id}.json",
+                )
+
+            self.data.transcription_file_path = str(segments_json)
+            self.logger.info(f"Segments JSON (for highlights.py) saved to: {segments_json}")
 
             return self._transition_to_state(PipelineState.TRANSCRIBED)
 
@@ -510,33 +517,21 @@ class VideoPipeline:
             self._transition_to_state(PipelineState.FAILED)
             return False
 
+
+    # ---------- REPLACE your step_extract_segments with this ----------
     def step_extract_segments(self) -> bool:
-        """Extract important segments from transcription."""
+        """Extract important segments from the already-correct segments JSON."""
         if not self._transition_to_state(PipelineState.EXTRACTING_SEGMENTS):
             return False
 
-        if not self.data.transcription_data:
-            self.logger.error("No transcription data available for segment extraction")
+        if not self.data.transcription_file_path:
+            self.logger.error("No segments JSON available for extraction")
             self._transition_to_state(PipelineState.FAILED)
             return False
 
         try:
-            # Convert transcription data to format expected by get_important.py
-            converted_data = self._convert_transcription_for_get_important()
-
-            # Save converted data to temporary file
-            temp_file = (
-                self.work_dir / f"converted_transcript_{self.data.session_id}.json"
-            )
-            with open(temp_file, "w", encoding="utf-8") as f:
-                json.dump(converted_data, f, ensure_ascii=False, indent=2)
-
-            # Extract important timestamps using get_important.py
-            important_segments = get_important_timestamps(str(temp_file))
-
-            # Clean up temp file
-            if temp_file.exists():
-                temp_file.unlink()
+            # Directly use the JSON file that matches highlights.py expectations
+            important_segments = get_important_timestamps(self.data.transcription_file_path)
 
             if not important_segments:
                 self.logger.error("No important segments identified")
@@ -545,13 +540,74 @@ class VideoPipeline:
 
             self.data.important_segments = important_segments
             self.logger.info(f"Identified {len(important_segments)} important segments")
-
             return self._transition_to_state(PipelineState.SEGMENTS_EXTRACTED)
 
         except Exception as e:
             self.logger.error(f"Segment extraction failed: {e}")
             self._transition_to_state(PipelineState.FAILED)
             return False
+
+
+    # ---------- ADD this helper somewhere in the class (e.g., near _seconds_to_timestamp) ----------
+    def _write_segments_json(self, merged: Dict[str, Any], out_path: Path) -> Path:
+        """
+        Write JSON in the format expected by highlights.load_transcript_from_json:
+        [
+            {"text": "<full transcript>"},
+            {"start": "HH:MM:SS,ms", "end": "HH:MM:SS,ms", "text": "<segment>"},
+            ...
+        ]
+        Falls back to grouping words into short segments if native segments aren't present.
+        """
+        full_text = (merged.get("text") or "").strip()
+
+        segments = merged.get("segments") or []
+        if not segments:
+            # fallback: build lightweight segments from words
+            words = merged.get("words") or []
+            segments = []
+            phrase, cur_start, last_end = [], None, None
+
+            def flush():
+                nonlocal phrase, cur_start, last_end
+                if phrase and cur_start is not None and last_end is not None:
+                    segments.append({
+                        "start": cur_start,
+                        "end": last_end,
+                        "text": " ".join(phrase).strip()
+                    })
+                phrase, cur_start, last_end = [], None, None
+
+            for w in words:
+                word = (w.get("word") or "").strip()
+                s = float(w.get("start", 0.0))
+                e = float(w.get("end", s))
+                if cur_start is None:
+                    cur_start = s
+                phrase.append(word)
+                last_end = e
+                if word.endswith((".", "!", "?", ",")) or len(phrase) >= 10:
+                    flush()
+            if phrase:
+                flush()
+
+        # Build pretty array
+        pretty = [{"text": full_text}]
+        for seg in segments:
+            s = seg.get("start")
+            e = seg.get("end")
+            txt = (seg.get("text") or "").strip()
+            if txt and s is not None and e is not None:
+                # Convert numeric seconds to "HH:MM:SS,mmm" if needed
+                s_str = self._seconds_to_timestamp(float(s)) if isinstance(s, (int, float)) else str(s)
+                e_str = self._seconds_to_timestamp(float(e)) if isinstance(e, (int, float)) else str(e)
+                pretty.append({"start": s_str, "end": e_str, "text": txt})
+
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(pretty, f, ensure_ascii=False, indent=2)
+        return out_path
+
 
     def step_cut_video(self) -> bool:
         """Cut and stitch video segments."""
