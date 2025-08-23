@@ -29,8 +29,8 @@ class VideoShorteningGUI:
         # Video display variables
         self.original_video_label: tk.Label | None = None
         self.shortened_video_label: tk.Label | None = None
-        self.original_cap = None
-        self.shortened_cap = None
+        self.original_cap: cv2.VideoCapture | None = None
+        self.shortened_cap: cv2.VideoCapture | None = None
         self.original_playing = False
         self.shortened_playing = False
 
@@ -55,11 +55,13 @@ class VideoShorteningGUI:
             file_frame,
             text="Select Video File",
             command=self.select_video_file,
-            font=("Arial", 12),
+            font=("Arial", 12, "bold"),
             bg="#4CAF50",
-            fg="white",
+            fg="black",
             padx=20,
             pady=5,
+            relief="raised",
+            borderwidth=2,
         )
         select_button.pack(side=tk.LEFT, padx=5)
 
@@ -113,10 +115,14 @@ class VideoShorteningGUI:
             text="Play",
             command=self.toggle_original_playback,
             state=tk.DISABLED,
-            font=("Arial", 10),
-            bg="#2196F3",
+            font=("Arial", 10, "bold"),
+            bg="#1976D2",
             fg="white",
             padx=15,
+            pady=3,
+            relief="raised",
+            borderwidth=2,
+            disabledforeground="#CCCCCC",
         )
         self.original_play_button.pack(side=tk.LEFT, padx=5)
 
@@ -157,10 +163,14 @@ class VideoShorteningGUI:
             text="Play",
             command=self.toggle_shortened_playback,
             state=tk.DISABLED,
-            font=("Arial", 10),
-            bg="#2196F3",
+            font=("Arial", 10, "bold"),
+            bg="#1976D2",
             fg="white",
             padx=15,
+            pady=3,
+            relief="raised",
+            borderwidth=2,
+            disabledforeground="#CCCCCC",
         )
         self.shortened_play_button.pack(side=tk.LEFT, padx=5)
 
@@ -169,10 +179,14 @@ class VideoShorteningGUI:
             text="Save Video",
             command=self.save_shortened_video,
             state=tk.DISABLED,
-            font=("Arial", 10),
-            bg="#FF9800",
+            font=("Arial", 10, "bold"),
+            bg="#F57C00",
             fg="white",
             padx=15,
+            pady=3,
+            relief="raised",
+            borderwidth=2,
+            disabledforeground="#CCCCCC",
         )
         self.save_button.pack(side=tk.LEFT, padx=5)
 
@@ -210,10 +224,15 @@ class VideoShorteningGUI:
             command=self.shorten_video,
             state=tk.DISABLED,
             font=("Arial", 14, "bold"),
-            bg="#FF5722",
+            bg="#D32F2F",
             fg="white",
             padx=30,
             pady=10,
+            relief="raised",
+            borderwidth=3,
+            activebackground="#B71C1C",
+            activeforeground="white",
+            disabledforeground="#CCCCCC",
         )
         self.shorten_button.pack(pady=10)
 
@@ -247,32 +266,40 @@ class VideoShorteningGUI:
         if self.original_cap:
             self.original_cap.release()
 
+        if not self.current_video_path:
+            return
+
         self.original_cap = cv2.VideoCapture(self.current_video_path)
         self.original_play_button.config(state=tk.NORMAL)
 
         # Display first frame
-        ret, frame = self.original_cap.read()
-        if ret:
-            self.display_frame(frame, self.original_video_label)
+        if self.original_cap.isOpened():
+            ret, frame = self.original_cap.read()
+            if ret:
+                self.display_frame(frame, self.original_video_label)
 
-        # Reset to beginning
-        self.original_cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            # Reset to beginning
+            self.original_cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
     def load_shortened_video(self):
         if self.shortened_cap:
             self.shortened_cap.release()
+
+        if not self.shortened_video_path:
+            return
 
         self.shortened_cap = cv2.VideoCapture(self.shortened_video_path)
         self.shortened_play_button.config(state=tk.NORMAL)
         self.save_button.config(state=tk.NORMAL)
 
         # Display first frame
-        ret, frame = self.shortened_cap.read()
-        if ret:
-            self.display_frame(frame, self.shortened_video_label)
+        if self.shortened_cap.isOpened():
+            ret, frame = self.shortened_cap.read()
+            if ret:
+                self.display_frame(frame, self.shortened_video_label)
 
-        # Reset to beginning
-        self.shortened_cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            # Reset to beginning
+            self.shortened_cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
     def display_frame(self, frame, label):
         # Convert BGR to RGB
@@ -439,7 +466,6 @@ class VideoShorteningGUI:
             messagebox.showerror("Error", "No shortened video to save.")
             return
 
-        default_name = f"{os.path.splitext(os.path.basename(self.current_video_path or ''))[0]}_shortened.mp4"
         save_path = filedialog.asksaveasfilename(
             title="Save Shortened Video",
             defaultextension=".mp4",
