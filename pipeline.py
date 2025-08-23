@@ -521,15 +521,12 @@ class VideoPipeline:
             return False
 
         try:
-            # Convert transcription data to format expected by get_important.py
-            converted_data = self._convert_transcription_for_get_important()
-
             # Save converted data to temporary file
             temp_file = (
                 self.work_dir / f"converted_transcript_{self.data.session_id}.json"
             )
             with open(temp_file, "w", encoding="utf-8") as f:
-                json.dump(converted_data, f, ensure_ascii=False, indent=2)
+                json.dump(self.data.transcription_data, f, ensure_ascii=False, indent=2)
 
             # Extract important timestamps using get_important.py
             important_segments = get_important_timestamps(str(temp_file))
@@ -586,58 +583,6 @@ class VideoPipeline:
             self.logger.error(f"Video cutting failed: {e}")
             self._transition_to_state(PipelineState.FAILED)
             return False
-
-    def _convert_transcription_for_get_important(self) -> list:
-        """
-        Convert transcriber output to format expected by get_important.py.
-
-        From: {"words": [{"word": str, "start": float, "end": float}]}
-        To: [{"start": "HH:MM:SS,mmm", "text": str}]
-        """
-        converted = []
-
-        if (
-            not self.data.transcription_data
-            or "words" not in self.data.transcription_data
-        ):
-            return converted
-
-        # Group words into phrases for better analysis
-        current_phrase = []
-        current_start = None
-
-        for word_data in self.data.transcription_data["words"]:
-            word = word_data.get("word", "").strip()
-            start = word_data.get("start", 0)
-
-            if current_start is None:
-                current_start = start
-
-            current_phrase.append(word)
-
-            # End phrase on punctuation or after reasonable length
-            ends_sentence = any(word.endswith(p) for p in [".", "!", "?"])
-            long_phrase = len(current_phrase) >= 10
-
-            if ends_sentence or long_phrase:
-                phrase_text = " ".join(current_phrase).strip()
-                if phrase_text:
-                    # Convert timestamp to HH:MM:SS,mmm format
-                    start_timestamp = self._seconds_to_timestamp(current_start)
-
-                    converted.append({"start": start_timestamp, "text": phrase_text})
-
-                current_phrase = []
-                current_start = None
-
-        # Handle remaining phrase
-        if current_phrase and current_start is not None:
-            phrase_text = " ".join(current_phrase).strip()
-            if phrase_text:
-                start_timestamp = self._seconds_to_timestamp(current_start)
-                converted.append({"start": start_timestamp, "text": phrase_text})
-
-        return converted
 
     def _seconds_to_timestamp(self, seconds: float) -> str:
         """Convert seconds to HH:MM:SS,mmm format."""
@@ -720,6 +665,21 @@ class VideoPipeline:
             pass
         except Exception as e:
             self.logger.warning(f"Error during cleanup: {e}")
+
+    def reset_pipeline(self):
+        """Reset the pipeline to initial state for processing a new video."""
+        self.logger.info("Resetting pipeline to initial state")
+
+        # Reset state
+        self.current_state = PipelineState.INITIAL
+
+        # Reset data
+        self.data = PipelineData()
+
+        # Re-initialize transcriber
+        self.transcriber = YouTubeTranscriber(self.config.openai_api_key)
+
+        self.logger.info("Pipeline reset completed")
 
 
 def main():

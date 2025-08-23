@@ -346,6 +346,22 @@ class VideoShorteningGUI:
         )
         self.shorten_button.pack(pady=10)
 
+        # Start New Video button (initially hidden)
+        self.new_video_button = tk.Button(
+            action_frame,
+            text="Start New Video",
+            command=self.start_new_video,
+            font=("Arial", 12, "bold"),
+            bg="#4CAF50",
+            fg="white",
+            padx=25,
+            pady=8,
+            relief="raised",
+            borderwidth=2,
+            cursor="hand2",
+        )
+        # Don't pack initially - will be shown after completion/failure
+
         # Progress bar
         self.progress_var = tk.StringVar()
         self.progress_label = tk.Label(
@@ -480,6 +496,9 @@ class VideoShorteningGUI:
         # Enable transcription button if we have transcription data
         if self.transcription_data:
             self.transcription_button.config(state=tk.NORMAL)
+
+        # Show the "Start New Video" button
+        self.new_video_button.pack(pady=5)
 
     def view_transcription(self):
         """Display transcription in a new window."""
@@ -633,6 +652,9 @@ class VideoShorteningGUI:
         self.url_entry.config(state=tk.NORMAL)
 
         messagebox.showerror("Download Error", f"Failed to download video: {error_msg}")
+
+        # Show the "Start New Video" button after failure
+        self.new_video_button.pack(pady=5)
 
     def load_original_video(self):
         if self.original_cap:
@@ -829,10 +851,16 @@ class VideoShorteningGUI:
         self.load_shortened_video()
         messagebox.showinfo("Success", "Video has been shortened successfully!")
 
+        # Show the "Start New Video" button
+        self.new_video_button.pack(pady=5)
+
     def on_video_processed_error(self, error_msg):
         self.progress_var.set("Error occurred during processing.")
         self.shorten_button.config(state=tk.NORMAL)
         messagebox.showerror("Error", f"Failed to process video: {error_msg}")
+
+        # Show the "Start New Video" button
+        self.new_video_button.pack(pady=5)
 
     def save_shortened_video(self):
         if not self.shortened_video_path or not os.path.exists(
@@ -860,6 +888,87 @@ class VideoShorteningGUI:
                 messagebox.showinfo("Success", f"Video saved to: {save_path}")
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to save video: {str(e)}")
+
+    def reset_for_new_video(self):
+        """Reset the GUI state for processing a new video."""
+        # Stop any playing videos
+        self.original_playing = False
+        self.shortened_playing = False
+
+        # Stop audio
+        pygame.mixer.music.stop()
+
+        # Release video captures
+        if self.original_cap:
+            self.original_cap.release()
+            self.original_cap = None
+        if self.shortened_cap:
+            self.shortened_cap.release()
+            self.shortened_cap = None
+
+        # Reset video paths
+        self.current_video_path = None
+        self.shortened_video_path = None
+        self.original_audio_path = None
+        self.shortened_audio_path = None
+
+        # Reset transcription data
+        self.transcription_data = None
+
+        # Clean up temporary audio files
+        for temp_file in self.temp_audio_files:
+            try:
+                if os.path.exists(temp_file):
+                    os.unlink(temp_file)
+            except Exception as e:
+                print(f"Error cleaning up temp file {temp_file}: {e}")
+        self.temp_audio_files = []
+
+        # Reset UI elements
+        self.file_label.config(text="No file selected")
+        self.progress_var.set("")
+
+        # Reset video displays
+        if self.original_video_label:
+            self.original_video_label.config(
+                image="", text="No video loaded", bg="black", fg="black"
+            )
+        if self.shortened_video_label:
+            self.shortened_video_label.config(
+                image="", text="No shortened video", bg="black", fg="black"
+            )
+
+        # Reset button states
+        self.original_play_button.config(state=tk.DISABLED, text="Play")
+        self.shortened_play_button.config(state=tk.DISABLED, text="Play")
+        self.save_button.config(state=tk.DISABLED)
+        self.transcription_button.config(state=tk.DISABLED)
+        self.shorten_button.config(state=tk.DISABLED)
+
+        # Enable input elements
+        self.url_entry.config(state=tk.NORMAL)
+        self.download_button.config(
+            state=tk.NORMAL, text="Download Video", bg="#FF5722", fg="black"
+        )
+
+        # Reset pipeline
+        self.pipeline.reset_pipeline()
+
+        # Hide the new video button
+        self.new_video_button.pack_forget()
+
+    def start_new_video(self):
+        """Start processing a new video by resetting everything."""
+        self.reset_for_new_video()
+        # Clear the URL field and set focus
+        self.url_entry.delete(0, tk.END)
+        self.url_entry.insert(0, "https://www.youtube.com/watch?v=example")
+        self.url_entry.focus_set()
+
+        # Show confirmation message
+        self.progress_var.set(
+            "Ready to process a new video. Enter a YouTube URL and click Download Video."
+        )
 
     def on_closing(self):
         # Clean up video captures and audio
