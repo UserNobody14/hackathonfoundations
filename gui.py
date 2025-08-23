@@ -326,17 +326,6 @@ class VideoShorteningGUI:
         action_frame = tk.Frame(self.root, bg="#f0f0f0")
         action_frame.pack(pady=20)
 
-        # Info label for automatic processing
-        info_label = tk.Label(
-            action_frame,
-            text="After downloading a video, AI will automatically identify important segments to create a shortened version.",
-            font=("Arial", 10),
-            bg="#f0f0f0",
-            fg="#666666",
-            wraplength=500,
-        )
-        info_label.pack(pady=10)
-
         # Shorten button
         self.shorten_button = tk.Button(
             action_frame,
