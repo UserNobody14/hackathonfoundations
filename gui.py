@@ -1,17 +1,15 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox, simpledialog
+from tkinter import filedialog, messagebox
 import cv2
 from PIL import Image, ImageTk
 import threading
 import time
 import os
-from cut import cut_and_stitch_video
 import pygame
 from moviepy import VideoFileClip
 import tempfile
-from transcriber import YouTubeTranscriber
-from pathlib import Path
 from dotenv import load_dotenv
+from pipeline import VideoPipeline, PipelineConfig
 
 load_dotenv()
 
@@ -37,53 +35,6 @@ def parse_timestamps(timestamp_text):
         return pairs
     except Exception as e:
         raise ValueError(f"Invalid timestamp format: {str(e)}")
-
-
-def download_and_transcribe_youtube_video(
-    url: str, progress_callback=None
-) -> tuple[str, dict]:
-    """
-    Real function to download and transcribe YouTube video using the transcriber.
-
-    Args:
-        url: YouTube URL
-        progress_callback: Optional callback function to report progress
-
-    Returns:
-        Tuple of (video_path, transcription_data)
-    """
-    try:
-        if progress_callback:
-            progress_callback("Initializing transcriber...")
-
-        transcriber = YouTubeTranscriber(OPENAI_API_KEY)
-
-        # Generate a name for this download based on timestamp
-        import datetime
-
-        name = f"video_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
-
-        if progress_callback:
-            progress_callback("Downloading and transcribing video...")
-
-        # This will download the video and transcribe it
-        transcription_data = transcriber.transcribe_youtube(
-            url, name, include_raw_json=True
-        )
-
-        # Find the downloaded video file
-        video_path = Path("input") / name / "video.mp4"
-
-        if not video_path.exists():
-            raise FileNotFoundError(f"Downloaded video not found at {video_path}")
-
-        if progress_callback:
-            progress_callback("Download and transcription completed!")
-
-        return str(video_path), transcription_data
-
-    except Exception as e:
-        raise Exception(f"Download/transcription error: {str(e)}")
 
 
 class VideoShorteningGUI:
@@ -121,6 +72,15 @@ class VideoShorteningGUI:
 
         # Transcription variables
         self.transcription_data: dict | None = None
+
+        # Pipeline for stateful processing
+        config = PipelineConfig(
+            openai_api_key=OPENAI_API_KEY,
+            work_dir="gui_pipeline_work",
+            output_dir="output",
+            keep_intermediate_files=True,
+        )
+        self.pipeline = VideoPipeline(config)
 
         self.setup_ui()
 
@@ -366,16 +326,21 @@ class VideoShorteningGUI:
         action_frame = tk.Frame(self.root, bg="#f0f0f0")
         action_frame.pack(pady=20)
 
-        # Timestamp input frame
-        timestamp_frame = tk.Frame(action_frame, bg="#f0f0f0")
-        timestamp_frame.pack(pady=10)
-
-        # self.setup_timestamp_input(timestamp_frame)
+        # Info label for automatic processing
+        info_label = tk.Label(
+            action_frame,
+            text="After downloading a video, AI will automatically identify important segments to create a shortened version.",
+            font=("Arial", 10),
+            bg="#f0f0f0",
+            fg="#666666",
+            wraplength=500,
+        )
+        info_label.pack(pady=10)
 
         # Shorten button
         self.shorten_button = tk.Button(
             action_frame,
-            text="Shorten Video",
+            text="View Shortened Video",
             command=self.shorten_video,
             state=tk.DISABLED,
             font=("Arial", 14, "bold"),
@@ -464,21 +429,28 @@ class VideoShorteningGUI:
         ).start()
 
     def process_youtube_download(self, url: str):
-        """Process YouTube download in background thread."""
+        """Process YouTube download in background thread using stateful pipeline."""
         try:
             # Progress callback to update UI
             def progress_callback(message):
                 self.root.after(0, lambda: self.progress_var.set(message))
 
-            video_path, transcription_data = download_and_transcribe_youtube_video(
-                url, progress_callback
+            # Use the stateful pipeline
+            result = self.pipeline.process_youtube_video(
+                youtube_url=url, progress_callback=progress_callback
             )
 
-            # Store transcription data
-            self.transcription_data = transcription_data
+            if result.success:
+                # Store transcription data
+                self.transcription_data = result.transcription_data
 
-            # Update UI in main thread
-            self.root.after(0, lambda: self.on_download_success(video_path))
+                # Update UI in main thread
+                self.root.after(
+                    0, lambda: self.on_download_success(result.original_video_path)
+                )
+            else:
+                error_msg = result.error_message or "Unknown pipeline error"
+                self.root.after(0, lambda: self.on_download_error(error_msg))
 
         except Exception as e:
             error_msg = str(e)
@@ -498,6 +470,8 @@ class VideoShorteningGUI:
             fg="black",
         )
         self.url_entry.config(state=tk.NORMAL)
+
+        # Enable shorten button since pipeline automatically creates shortened video
         self.shorten_button.config(state=tk.NORMAL)
 
         # Load the downloaded video
@@ -822,57 +796,41 @@ class VideoShorteningGUI:
         if not self.shortened_playing:
             self.root.after(0, lambda: self.shortened_play_button.config(text="Play"))
 
-    # TODO: swap in the real function
     def shorten_video(self):
+        """Create shortened video using pipeline's important segments."""
         if not self.current_video_path:
-            messagebox.showerror("Error", "Please select a video file first.")
+            messagebox.showerror("Error", "Please download a video first.")
             return
 
-        timestamp_text = self.timestamp_entry.get().strip()
-        if not timestamp_text:
-            messagebox.showerror("Error", "Please enter timestamp pairs.")
-            return
-
-        try:
-            timestamp_pairs = parse_timestamps(timestamp_text)
-        except ValueError as e:
-            messagebox.showerror("Error", str(e))
-            return
-
-        # Create output path
-        input_name = os.path.splitext(os.path.basename(self.current_video_path))[0]
-        output_dir = os.path.join(os.path.dirname(self.current_video_path), "shortened")
-        os.makedirs(output_dir, exist_ok=True)
-        self.shortened_video_path = os.path.join(
-            output_dir, f"{input_name}_shortened.mp4"
-        )
-
-        # Disable buttons during processing
-        self.shorten_button.config(state=tk.DISABLED)
-        self.progress_var.set("Processing video... Please wait.")
-
-        # Run video shortening in a separate thread
-        threading.Thread(
-            target=self.process_video, args=(timestamp_pairs,), daemon=True
-        ).start()
-
-    def process_video(self, timestamp_pairs):
-        try:
-            if not self.current_video_path or not self.shortened_video_path:
-                raise ValueError("Video paths not properly set")
-
-            cut_and_stitch_video(
-                timestamp_pairs=timestamp_pairs,
-                input_video_path=self.current_video_path,
-                output_video_path=self.shortened_video_path,
+        # Check if we have pipeline results with important segments
+        if (
+            not hasattr(self.pipeline, "data")
+            or not self.pipeline.data.important_segments
+        ):
+            messagebox.showerror(
+                "Error",
+                "No important segments found. Please download and process a video first.",
             )
+            return
 
-            # Update UI in main thread
-            self.root.after(0, self.on_video_processed_success)
-
-        except Exception as e:
-            error_msg = str(e)
-            self.root.after(0, lambda: self.on_video_processed_error(error_msg))
+        # Use the shortened video path from the pipeline
+        if self.pipeline.data.shortened_video_path:
+            if os.path.exists(self.pipeline.data.shortened_video_path):
+                self.shortened_video_path = self.pipeline.data.shortened_video_path
+                self.load_shortened_video()
+                messagebox.showinfo(
+                    "Success",
+                    f"Shortened video is ready! Segments: {len(self.pipeline.data.important_segments)}",
+                )
+            else:
+                messagebox.showerror(
+                    "Error",
+                    f"Shortened video file not found at: {self.pipeline.data.shortened_video_path}",
+                )
+        else:
+            messagebox.showerror(
+                "Error", "Shortened video not found in pipeline results."
+            )
 
     def on_video_processed_success(self):
         self.progress_var.set(
