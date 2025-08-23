@@ -6,6 +6,9 @@ import threading
 import time
 import os
 from cut import cut_and_stitch_video
+import pygame
+from moviepy import VideoFileClip
+import tempfile
 
 
 class VideoShorteningGUI:
@@ -34,7 +37,38 @@ class VideoShorteningGUI:
         self.original_playing = False
         self.shortened_playing = False
 
+        # Audio variables
+        pygame.mixer.init()
+        self.original_audio_path: str | None = None
+        self.shortened_audio_path: str | None = None
+        self.audio_start_time: float = 0
+        self.temp_audio_files = []  # Track temp files for cleanup
+
         self.setup_ui()
+
+    def extract_audio_from_video(self, video_path: str) -> str | None:
+        """Extract audio from video file and return path to temporary audio file."""
+        try:
+            video_clip = VideoFileClip(video_path)
+            if video_clip.audio is None:
+                return None
+
+            # Create temporary audio file
+            temp_audio = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+            temp_audio_path = temp_audio.name
+            temp_audio.close()
+
+            # Extract audio
+            video_clip.audio.write_audiofile(temp_audio_path, logger=None)
+            video_clip.close()
+
+            # Track temp file for cleanup
+            self.temp_audio_files.append(temp_audio_path)
+            return temp_audio_path
+
+        except Exception as e:
+            print(f"Error extracting audio: {e}")
+            return None
 
     def setup_ui(self):
         # Main title
@@ -101,7 +135,7 @@ class VideoShorteningGUI:
             self.original_video_frame,
             text="No video loaded",
             bg="black",
-            fg="white",
+            fg="black",
             font=("Arial", 12),
         )
         self.original_video_label.pack(expand=True)
@@ -117,7 +151,7 @@ class VideoShorteningGUI:
             state=tk.DISABLED,
             font=("Arial", 10, "bold"),
             bg="#1976D2",
-            fg="white",
+            fg="black",
             padx=15,
             pady=3,
             relief="raised",
@@ -149,7 +183,7 @@ class VideoShorteningGUI:
             self.shortened_video_frame,
             text="No shortened video",
             bg="black",
-            fg="white",
+            fg="black",
             font=("Arial", 12),
         )
         self.shortened_video_label.pack(expand=True)
@@ -165,7 +199,7 @@ class VideoShorteningGUI:
             state=tk.DISABLED,
             font=("Arial", 10, "bold"),
             bg="#1976D2",
-            fg="white",
+            fg="black",
             padx=15,
             pady=3,
             relief="raised",
@@ -181,7 +215,7 @@ class VideoShorteningGUI:
             state=tk.DISABLED,
             font=("Arial", 10, "bold"),
             bg="#F57C00",
-            fg="white",
+            fg="black",
             padx=15,
             pady=3,
             relief="raised",
@@ -225,7 +259,7 @@ class VideoShorteningGUI:
             state=tk.DISABLED,
             font=("Arial", 14, "bold"),
             bg="#D32F2F",
-            fg="white",
+            fg="black",
             padx=30,
             pady=10,
             relief="raised",
@@ -272,6 +306,11 @@ class VideoShorteningGUI:
         self.original_cap = cv2.VideoCapture(self.current_video_path)
         self.original_play_button.config(state=tk.NORMAL)
 
+        # Extract audio from original video
+        self.original_audio_path = self.extract_audio_from_video(
+            self.current_video_path
+        )
+
         # Display first frame
         if self.original_cap.isOpened():
             ret, frame = self.original_cap.read()
@@ -291,6 +330,11 @@ class VideoShorteningGUI:
         self.shortened_cap = cv2.VideoCapture(self.shortened_video_path)
         self.shortened_play_button.config(state=tk.NORMAL)
         self.save_button.config(state=tk.NORMAL)
+
+        # Extract audio from shortened video
+        self.shortened_audio_path = self.extract_audio_from_video(
+            self.shortened_video_path
+        )
 
         # Display first frame
         if self.shortened_cap.isOpened():
@@ -329,26 +373,47 @@ class VideoShorteningGUI:
         if self.original_playing:
             self.original_playing = False
             self.original_play_button.config(text="Play")
+            # Stop audio
+            pygame.mixer.music.stop()
         else:
             self.original_playing = True
             self.original_play_button.config(text="Pause")
+            # Start audio if available
+            if self.original_audio_path and os.path.exists(self.original_audio_path):
+                pygame.mixer.music.load(self.original_audio_path)
+                pygame.mixer.music.play()
+                self.audio_start_time = time.time()
             threading.Thread(target=self.play_original_video, daemon=True).start()
 
     def toggle_shortened_playback(self):
         if self.shortened_playing:
             self.shortened_playing = False
             self.shortened_play_button.config(text="Play")
+            # Stop audio
+            pygame.mixer.music.stop()
         else:
             self.shortened_playing = True
             self.shortened_play_button.config(text="Pause")
+            # Start audio if available
+            if self.shortened_audio_path and os.path.exists(self.shortened_audio_path):
+                pygame.mixer.music.load(self.shortened_audio_path)
+                pygame.mixer.music.play()
+                self.audio_start_time = time.time()
             threading.Thread(target=self.play_shortened_video, daemon=True).start()
 
     def play_original_video(self):
         while self.original_playing and self.original_cap:
             ret, frame = self.original_cap.read()
             if not ret:
-                # End of video, reset to beginning
+                # End of video, reset to beginning and restart audio
                 self.original_cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                if self.original_audio_path and os.path.exists(
+                    self.original_audio_path
+                ):
+                    pygame.mixer.music.stop()
+                    pygame.mixer.music.load(self.original_audio_path)
+                    pygame.mixer.music.play()
+                    self.audio_start_time = time.time()
                 ret, frame = self.original_cap.read()
 
             if ret:
@@ -363,8 +428,15 @@ class VideoShorteningGUI:
         while self.shortened_playing and self.shortened_cap:
             ret, frame = self.shortened_cap.read()
             if not ret:
-                # End of video, reset to beginning
+                # End of video, reset to beginning and restart audio
                 self.shortened_cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                if self.shortened_audio_path and os.path.exists(
+                    self.shortened_audio_path
+                ):
+                    pygame.mixer.music.stop()
+                    pygame.mixer.music.load(self.shortened_audio_path)
+                    pygame.mixer.music.play()
+                    self.audio_start_time = time.time()
                 ret, frame = self.shortened_cap.read()
 
             if ret:
@@ -487,14 +559,26 @@ class VideoShorteningGUI:
                 messagebox.showerror("Error", f"Failed to save video: {str(e)}")
 
     def on_closing(self):
-        # Clean up video captures
+        # Clean up video captures and audio
         self.original_playing = False
         self.shortened_playing = False
+
+        # Stop audio
+        pygame.mixer.music.stop()
+        pygame.mixer.quit()
 
         if self.original_cap:
             self.original_cap.release()
         if self.shortened_cap:
             self.shortened_cap.release()
+
+        # Clean up temporary audio files
+        for temp_file in self.temp_audio_files:
+            try:
+                if os.path.exists(temp_file):
+                    os.unlink(temp_file)
+            except Exception as e:
+                print(f"Error cleaning up temp file {temp_file}: {e}")
 
         self.root.destroy()
 
