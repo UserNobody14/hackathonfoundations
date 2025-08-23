@@ -47,7 +47,7 @@ def get_important_timestamps(json_file_path: str) -> List[Tuple[float, float]]:
 
 
     response = client.responses.parse(
-        model="gpt-5",
+        model="gpt-4o-2024-08-06",
         input=[
             {
                 "role": "system", 
