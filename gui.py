@@ -117,6 +117,7 @@ class VideoShorteningGUI:
             pady=5,
             relief="raised",
             borderwidth=2,
+            cursor="hand2",
         )
         select_button.pack(side=tk.LEFT, padx=5)
 
@@ -178,6 +179,7 @@ class VideoShorteningGUI:
             relief="raised",
             borderwidth=2,
             disabledforeground="#CCCCCC",
+            cursor="hand2",
         )
         self.original_play_button.pack(side=tk.LEFT, padx=5)
 
@@ -226,6 +228,7 @@ class VideoShorteningGUI:
             relief="raised",
             borderwidth=2,
             disabledforeground="#CCCCCC",
+            cursor="hand2",
         )
         self.shortened_play_button.pack(side=tk.LEFT, padx=5)
 
@@ -242,6 +245,7 @@ class VideoShorteningGUI:
             relief="raised",
             borderwidth=2,
             disabledforeground="#CCCCCC",
+            cursor="hand2",
         )
         self.save_button.pack(side=tk.LEFT, padx=5)
 
@@ -271,6 +275,7 @@ class VideoShorteningGUI:
             activebackground="#B71C1C",
             activeforeground="white",
             disabledforeground="#CCCCCC",
+            cursor="hand2",
         )
         self.shorten_button.pack(pady=10)
 
@@ -301,7 +306,9 @@ class VideoShorteningGUI:
             fg="#666666",
         ).pack()
 
-        self.timestamp_entry = tk.Entry(timestamp_frame, width=50, font=("Arial", 10))
+        self.timestamp_entry = tk.Entry(
+            timestamp_frame, width=50, font=("Arial", 10), cursor="ibeam"
+        )
         self.timestamp_entry.pack(pady=5)
         self.timestamp_entry.insert(0, "10,20;30,40")  # Default example
 
