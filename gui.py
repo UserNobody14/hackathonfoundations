@@ -11,6 +11,27 @@ from moviepy import VideoFileClip
 import tempfile
 
 
+def parse_timestamps(timestamp_text):
+    """Parse timestamp pairs from input text."""
+    try:
+        pairs = []
+        segments = timestamp_text.split(";")
+
+        for segment in segments:
+            segment = segment.strip()
+            if not segment:
+                continue
+
+            start_str, end_str = segment.split(",")
+            start = float(start_str.strip())
+            end = float(end_str.strip())
+            pairs.append((start, end))
+
+        return pairs
+    except Exception as e:
+        raise ValueError(f"Invalid timestamp format: {str(e)}")
+
+
 class VideoShorteningGUI:
     def __init__(self, root):
         self.root = root
@@ -232,24 +253,7 @@ class VideoShorteningGUI:
         timestamp_frame = tk.Frame(action_frame, bg="#f0f0f0")
         timestamp_frame.pack(pady=10)
 
-        tk.Label(
-            timestamp_frame,
-            text="Timestamp pairs (start,end in seconds, separated by semicolons):",
-            font=("Arial", 10),
-            bg="#f0f0f0",
-        ).pack()
-
-        tk.Label(
-            timestamp_frame,
-            text="Example: 10,20;30,45;60,80",
-            font=("Arial", 9, "italic"),
-            bg="#f0f0f0",
-            fg="#666666",
-        ).pack()
-
-        self.timestamp_entry = tk.Entry(timestamp_frame, width=50, font=("Arial", 10))
-        self.timestamp_entry.pack(pady=5)
-        self.timestamp_entry.insert(0, "10,20;30,40")  # Default example
+        # self.setup_timestamp_input(timestamp_frame)
 
         # Shorten button
         self.shorten_button = tk.Button(
@@ -280,6 +284,26 @@ class VideoShorteningGUI:
             fg="#666666",
         )
         self.progress_label.pack(pady=5)
+
+    def setup_timestamp_input(self, timestamp_frame):
+        tk.Label(
+            timestamp_frame,
+            text="Timestamp pairs (start,end in seconds, separated by semicolons):",
+            font=("Arial", 10),
+            bg="#f0f0f0",
+        ).pack()
+
+        tk.Label(
+            timestamp_frame,
+            text="Example: 10,20;30,45;60,80",
+            font=("Arial", 9, "italic"),
+            bg="#f0f0f0",
+            fg="#666666",
+        ).pack()
+
+        self.timestamp_entry = tk.Entry(timestamp_frame, width=50, font=("Arial", 10))
+        self.timestamp_entry.pack(pady=5)
+        self.timestamp_entry.insert(0, "10,20;30,40")  # Default example
 
     def select_video_file(self):
         file_path = filedialog.askopenfilename(
@@ -447,26 +471,6 @@ class VideoShorteningGUI:
         if not self.shortened_playing:
             self.root.after(0, lambda: self.shortened_play_button.config(text="Play"))
 
-    def parse_timestamps(self, timestamp_text):
-        """Parse timestamp pairs from input text."""
-        try:
-            pairs = []
-            segments = timestamp_text.split(";")
-
-            for segment in segments:
-                segment = segment.strip()
-                if not segment:
-                    continue
-
-                start_str, end_str = segment.split(",")
-                start = float(start_str.strip())
-                end = float(end_str.strip())
-                pairs.append((start, end))
-
-            return pairs
-        except Exception as e:
-            raise ValueError(f"Invalid timestamp format: {str(e)}")
-
     def shorten_video(self):
         if not self.current_video_path:
             messagebox.showerror("Error", "Please select a video file first.")
@@ -478,7 +482,7 @@ class VideoShorteningGUI:
             return
 
         try:
-            timestamp_pairs = self.parse_timestamps(timestamp_text)
+            timestamp_pairs = parse_timestamps(timestamp_text)
         except ValueError as e:
             messagebox.showerror("Error", str(e))
             return
